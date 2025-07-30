@@ -1,0 +1,98 @@
+//تحريك محور X لحد ما يوصل الLIMIT SWITH
+//بعدها بمشي عدد خطوات محدد ب  Y
+// --- محور X ---
+#define STEP_PIN_X 4
+#define DIR_PIN_X 3
+#define ENA_PIN_X 2
+#define LIMIT_SWITCH_X1 5
+#define LIMIT_SWITCH_X2 6
+
+// --- محور Y (موتورين) ---
+#define EN1 7
+#define DIR1 8
+#define PUL1 9
+
+#define EN2 10
+#define DIR2 11
+#define PUL2 12
+
+bool currentDirectionX = LOW;
+bool switchX1PreviouslyPressed = false;
+bool switchX2PreviouslyPressed = false;
+
+bool xDone = false;
+
+void setup() {
+  // إعداد أرجل X
+  pinMode(STEP_PIN_X, OUTPUT);
+  pinMode(DIR_PIN_X, OUTPUT);
+  pinMode(ENA_PIN_X, OUTPUT);
+  pinMode(LIMIT_SWITCH_X1, INPUT_PULLUP);
+  pinMode(LIMIT_SWITCH_X2, INPUT_PULLUP);
+
+  // إعداد أرجل Y
+  pinMode(EN1, OUTPUT);
+  pinMode(DIR1, OUTPUT);
+  pinMode(PUL1, OUTPUT);
+
+  pinMode(EN2, OUTPUT);
+  pinMode(DIR2, OUTPUT);
+  pinMode(PUL2, OUTPUT);
+
+  // تفعيل الدرايفرات
+  digitalWrite(ENA_PIN_X, LOW);
+  digitalWrite(EN1, LOW);
+  digitalWrite(EN2, LOW);
+
+  // تعيين الاتجاه الابتدائي
+  digitalWrite(DIR_PIN_X, currentDirectionX);
+  digitalWrite(DIR1, HIGH);
+  digitalWrite(DIR2, HIGH);
+}
+
+void loop() {
+  if (!xDone) {
+    bool switch1Pressed = (digitalRead(LIMIT_SWITCH_X1) == LOW);
+    bool switch2Pressed = (digitalRead(LIMIT_SWITCH_X2) == LOW);
+
+    if (switch1Pressed && !switchX1PreviouslyPressed) {
+      currentDirectionX = !currentDirectionX;
+      digitalWrite(DIR_PIN_X, currentDirectionX);
+      delay(200);
+    }
+
+    if (switch2Pressed && !switchX2PreviouslyPressed) {
+      currentDirectionX = !currentDirectionX;
+      digitalWrite(DIR_PIN_X, currentDirectionX);
+      delay(200);
+    }
+
+    switchX1PreviouslyPressed = switch1Pressed;
+    switchX2PreviouslyPressed = switch2Pressed;
+
+    digitalWrite(STEP_PIN_X, HIGH);
+    delayMicroseconds(50);
+    digitalWrite(STEP_PIN_X, LOW);
+    delayMicroseconds(50);
+
+    // شرط لإنهاء التحريك على X (مثلاً بعد الضغط على أحد الليمت سويتشات)
+    if (switch1Pressed || switch2Pressed) {
+      xDone = true;
+      delay(500); // مهلة قبل الانتقال إلى Y
+    }
+  } else {
+    // تحريك Y: موتورين معًا
+    for (int i = 0; i < 3000; i++) {  // عدد الخطوات (عدله حسب المسافة)
+      digitalWrite(PUL1, HIGH);
+      digitalWrite(PUL2, HIGH);
+      delayMicroseconds(100);
+
+      digitalWrite(PUL1, LOW);
+      digitalWrite(PUL2, LOW);
+      delayMicroseconds(100);
+    }
+
+    // وقف التكرار بعد الانتهاء
+    while (true);  // إيقاف اللوب نهائيًا (ممكن تستبدله بشي ثاني حسب التطبيق)
+  }
+}
