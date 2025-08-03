@@ -1,0 +1,41 @@
+// --- الدرايفر الأول ---
+#define EN1 7
+#define DIR1 8
+#define PUL1 9
+
+// --- الدرايفر الثاني ---
+#define EN2 10
+#define DIR2 11
+#define PUL2 12
+
+void setup() {
+  // إعداد الأرجل كمخرجات
+  pinMode(EN1, OUTPUT);
+  pinMode(DIR1, OUTPUT);
+  pinMode(PUL1, OUTPUT);
+
+  pinMode(EN2, OUTPUT);
+  pinMode(DIR2, OUTPUT);
+  pinMode(PUL2, OUTPUT);
+
+  // تفعيل الدرايفرات (Low = تمكين)
+  digitalWrite(EN1, LOW);
+  digitalWrite(EN2, LOW);
+
+  // تعيين الاتجاه (LOW أو HIGH حسب الاتجاه المطلوب)
+  digitalWrite(DIR1, HIGH);
+  digitalWrite(DIR2, HIGH);
+}
+
+void loop() {
+  // إرسال نبضة لكلا المحركين في نفس الوقت
+  digitalWrite(PUL1, HIGH);
+  digitalWrite(PUL2, HIGH);
+  delayMicroseconds(100);  // مدة النبضة
+
+  digitalWrite(PUL1, LOW);
+  digitalWrite(PUL2, LOW);
+  delayMicroseconds(100);  // زمن التوقف بين النبضات
+
+  // كرر عدد النبضات المطلوب لتحريك المحركين للمسافة المطلوبة
+}
