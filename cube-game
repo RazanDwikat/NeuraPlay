@@ -1,0 +1,242 @@
+#include <Servo.h>
+#include <Keypad.h>
+
+// --- الموتور X ---
+#define STEP_PIN_X 4
+#define DIR_PIN_X 14
+#define ENA_PIN_X 2
+#define LIMIT_SWITCH_X1 5  // هومينج X
+
+// --- الموتور Y ---
+#define STEP_PIN_Y 9
+#define DIR_PIN_Y1 8
+#define DIR_PIN_Y2 11
+#define LIMIT_SWITCH_Y1 22
+#define LIMIT_SWITCH_Y2 23  // هومينج Y
+
+// --- السيرفو ---
+Servo servo1;  // المفصل الأول
+Servo servo2;  // الكوع
+Servo servo3;  // الجريبر
+
+// --- إعدادات الحركة ---
+const unsigned int STEP_DELAY_US = 500;
+
+// --- إعدادات الكيباد ---
+const byte ROWS = 4;
+const byte COLS = 4;
+char hexaKeys[ROWS][COLS] = {
+  {'B','A','3','A'},
+  {'6','3','6','B'},
+  {'5','2','9','C'},
+  {'4','1','#','D'}
+};
+byte rowPins[ROWS] = {44, 45, 46, 47}; 
+byte colPins[COLS] = {48, 49, 7, 6};
+Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
+
+// --- دوال الحركة لمحور X ---
+void moveStepsX(int steps, bool direction) {
+  digitalWrite(DIR_PIN_X, direction);
+  for (int i = 0; i < steps; i++) {
+    digitalWrite(STEP_PIN_X, HIGH);
+    delayMicroseconds(STEP_DELAY_US);
+    digitalWrite(STEP_PIN_X, LOW);
+    delayMicroseconds(STEP_DELAY_US);
+  }
+}
+
+void moveStepsY(int steps, bool dirY1, bool dirY2) {
+  digitalWrite(DIR_PIN_Y1, dirY1);
+  digitalWrite(DIR_PIN_Y2, dirY2);
+  for (int i = 0; i < steps; i++) {
+    digitalWrite(STEP_PIN_Y, HIGH);
+    delayMicroseconds(STEP_DELAY_US);
+    digitalWrite(STEP_PIN_Y, LOW);
+    delayMicroseconds(STEP_DELAY_US);
+  }
+}
+
+// --- دوال الهومينج ---
+void homeX() {
+  Serial.println("Homing X...");
+  digitalWrite(DIR_PIN_X, LOW);  // اتجاه الهومينج
+  while (digitalRead(LIMIT_SWITCH_X1) == HIGH) {
+    digitalWrite(STEP_PIN_X, HIGH);
+    delayMicroseconds(STEP_DELAY_US);
+    digitalWrite(STEP_PIN_X, LOW);
+    delayMicroseconds(STEP_DELAY_US);
+  }
+  Serial.println("تم الوصول إلى Home لمحور X");
+  delay(500);
+}
+
+void homeY() {
+  Serial.println("Homing Y...");
+  digitalWrite(DIR_PIN_Y1, HIGH);
+  digitalWrite(DIR_PIN_Y2, LOW);
+  while (digitalRead(LIMIT_SWITCH_Y2) == HIGH) {
+    digitalWrite(STEP_PIN_Y, HIGH);
+    delayMicroseconds(STEP_DELAY_US);
+    digitalWrite(STEP_PIN_Y, LOW);
+    delayMicroseconds(STEP_DELAY_US);
+  }
+  Serial.println("تم الوصول إلى Home لمحور Y");
+  delay(500);
+}
+
+// --- دوال الجريبر ---
+void liftGripper() {
+  int currentAngle = servo1.read();
+  for (int angle = currentAngle; angle <= 60; angle += 2) {
+    servo1.write(angle);
+    delay(30);
+  }
+}
+
+void lowerGripperToGrab() {
+  servo1.write(20);
+  delay(300);
+}
+
+void openGripper() {
+  servo3.write(50);
+  delay(500);
+}
+
+void closeGripper() {
+  servo3.write(20);
+  delay(500);
+}
+
+void moveServo2Backward(int targetAngle) {
+  int currentAngle = servo2.read();
+  if (currentAngle > targetAngle) {
+    for (int angle = currentAngle; angle >= targetAngle; angle -= 2) {
+      servo2.write(angle);
+      delay(30);
+    }
+  } else if (currentAngle < targetAngle) {
+    for (int angle = currentAngle; angle <= targetAngle; angle += 2) {
+      servo2.write(angle);
+      delay(30);
+    }
+  }
+}
+
+// --- إعادة السيرفو للوضعية المرجعية ---
+void resetServosToStart() {
+  servo1.write(0);
+  servo2.write(90);
+  servo3.write(60);
+  delay(1000);
+}
+
+// --- دالة تشغيل تسلسل الحركة الأساسي ---
+void runRobotSequence() {
+  // ضبط البداية
+  resetServosToStart();
+  homeY();
+  homeX();
+
+  Serial.println("بدء تسلسل الحركة الأساسي...");
+
+  // --- تسلسل 1 ---
+  openGripper();
+  liftGripper();
+  moveStepsX(11250, HIGH);
+  moveStepsY(2000, LOW, HIGH);
+  lowerGripperToGrab();
+  servo1.write(10);
+  closeGripper();
+  delay(2000);
+  liftGripper();
+  homeX();
+  moveStepsY(1600, HIGH, LOW);
+  lowerGripperToGrab();
+  delay(2000);
+  servo3.write(60);
+  delay(1000);
+
+  // --- تسلسل 2 ---
+  homeY();
+  homeX();
+  liftGripper();
+  moveStepsX(8250, HIGH);
+  moveStepsY(2000, LOW, HIGH);
+  lowerGripperToGrab();
+  delay(1000);
+  servo1.write(15);
+  delay(700);
+  closeGripper();
+  liftGripper();
+  homeX();
+  moveStepsY(2200, HIGH, LOW);
+  servo2.write(80);
+  lowerGripperToGrab();
+  delay(2000);
+  servo3.write(60);
+  delay(1000);
+
+  // // --- تسلسل 3 ---
+  // homeY();
+  // homeX();
+  // liftGripper();
+  // moveStepsX(5270, HIGH);
+  // moveStepsY(2000, LOW, HIGH);
+  // lowerGripperToGrab();
+  // delay(1000);
+  // servo1.write(15);
+  // delay(700);
+  // closeGripper();
+  // liftGripper();
+  // homeX();
+  // moveStepsY(2200, HIGH, LOW);
+  // servo2.write(130);
+  // lowerGripperToGrab();
+  // delay(2000);
+  // servo3.write(60);
+  // delay(1000);
+
+  Serial.println("انتهت جميع التسلسلات");
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  // إعدادات محور X
+  pinMode(STEP_PIN_X, OUTPUT);
+  pinMode(DIR_PIN_X, OUTPUT);
+  pinMode(ENA_PIN_X, OUTPUT);
+  pinMode(LIMIT_SWITCH_X1, INPUT_PULLUP);
+  digitalWrite(ENA_PIN_X, LOW);
+
+  // إعدادات محور Y
+  pinMode(STEP_PIN_Y, OUTPUT);
+  pinMode(DIR_PIN_Y1, OUTPUT);
+  pinMode(DIR_PIN_Y2, OUTPUT);
+  pinMode(LIMIT_SWITCH_Y1, INPUT_PULLUP);
+  pinMode(LIMIT_SWITCH_Y2, INPUT_PULLUP);
+
+  // إعدادات السيرفو
+  servo1.attach(30);
+  servo2.attach(31);
+  servo3.attach(35);
+
+  // تحديد الوضعية المرجعية أول ما يشتغل الأردوينو
+  resetServosToStart();
+
+  Serial.println("Arduino جاهز، اضغط '1' على الكيباد لتشغيل الروبوت.");
+}
+
+void loop() {
+  char key = customKeypad.getKey();
+  if (key) {
+    Serial.print("Pressed key: ");
+    Serial.println(key);
+
+    if (key == '1') {
+      runRobotSequence();
+    }
+  }
+}
