@@ -1,0 +1,109 @@
+#include <Keypad.h>
+#include <SoftwareSerial.h>
+#include <DFRobotDFPlayerMini.h>
+
+// ===== الكيباد =====
+const byte ROWS = 4; // عدد الصفوف
+const byte COLS = 4; // عدد الأعمدة
+
+char hexaKeys[ROWS][COLS] = {
+  {'B','A','3','A'},
+  {'6','3','6','B'},
+  {'5','2','9','C'},
+  {'4','1','#','D'}
+};
+
+byte rowPins[ROWS] = {44, 45, 46, 47};
+byte colPins[COLS] = {48, 49, 7, 6};
+
+Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
+
+// ===== DFPlayer Mini =====
+#define SFX_RX 50
+#define SFX_TX 51
+SoftwareSerial DFSerial(SFX_RX, SFX_TX);
+DFRobotDFPlayerMini myDFPlayer;
+byte sfxVolume = 25; // من 0 إلى 30
+
+// ===== الأزرار واللمبات =====
+#define LED1_PIN 37
+#define BUTTON1_PIN 36
+#define LED2_PIN 38
+#define BUTTON2_PIN 39
+#define LED3_PIN 41
+#define BUTTON3_PIN 40
+#define LED4_PIN 42
+#define BUTTON4_PIN 43
+
+#define NUM_BUTTONS 4
+int ledPins[NUM_BUTTONS] = {LED1_PIN, LED2_PIN, LED3_PIN, LED4_PIN};
+int buttonPins[NUM_BUTTONS] = {BUTTON1_PIN, BUTTON2_PIN, BUTTON3_PIN, BUTTON4_PIN};
+
+// ===== متغير تشغيل اللعبة =====
+bool gameActive = false;
+
+void setup() {
+  Serial.begin(9600);
+
+  // تهيئة DFPlayer
+  DFSerial.begin(9600);
+  if (!myDFPlayer.begin(DFSerial)) {
+    while (true); // توقف إذا لم يتعرف على DFPlayer
+  }
+  myDFPlayer.volume(sfxVolume);
+
+  // تهيئة الأزرار واللمبات
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    pinMode(ledPins[i], OUTPUT);
+    pinMode(buttonPins[i], INPUT_PULLUP);
+  }
+
+  randomSeed(analogRead(0)); // أرقام عشوائية أفضل
+}
+
+void loop() {
+  char customKey = customKeypad.getKey();
+
+  // إذا كبس "2" من الكيباد يبدأ اللعبة
+  if (customKey == '2') {
+    Serial.println("تشغيل اللعبة");
+    myDFPlayer.play(8); // صوت البداية
+    delay(2000);
+    gameActive = true;
+  }
+
+  if (gameActive) {
+    int choice = random(NUM_BUTTONS); // اختيار عشوائي
+    runButtonRound(ledPins[choice], buttonPins[choice], 5000);
+    delay(1000);
+  }
+}
+
+void runButtonRound(int ledPin, int buttonPin, unsigned long duration) {
+  digitalWrite(ledPin, HIGH);
+
+  unsigned long startTime = millis();
+  bool pressedCorrect = false;
+
+  while (millis() - startTime < duration) {
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+      if (digitalRead(buttonPins[i]) == LOW) {
+        if (buttonPins[i] == buttonPin) {
+          pressedCorrect = true;
+        }
+        goto roundEnd;
+      }
+    }
+  }
+
+roundEnd:
+  digitalWrite(ledPin, LOW);
+
+  if (pressedCorrect) {
+    myDFPlayer.play(4); // فوز
+  } else {
+    myDFPlayer.play(6); // خسارة
+  }
+
+  delay(2000);
+}
