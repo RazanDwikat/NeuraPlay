@@ -1,0 +1,145 @@
+import cv2
+import numpy as np
+from picamera2 import Picamera2
+import time
+import os
+import serial
+import glob
+
+# --- ???? ??? ???? ????? ---
+SAVE_PATH = "drawings/child_drawing.png"
+os.makedirs("drawings", exist_ok=True)
+
+# --- ????? ???????? ---
+picam2 = Picamera2()
+picam2.preview_configuration.main.size = (640, 480)
+picam2.preview_configuration.main.format = "RGB888"
+picam2.configure("preview")
+picam2.start()
+time.sleep(2)
+
+# --- ????? ???????? ?? ????????? ---
+ser = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+ser.flush()
+
+# --- ???? ?????? ?????? ---
+def enhance_image(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    eq = cv2.equalizeHist(blur)
+    return eq
+
+def detect_paper(frame):
+    enhanced = enhance_image(frame)
+    edges = cv2.Canny(enhanced, 50, 150)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    biggest = max(contours, key=cv2.contourArea)
+    peri = cv2.arcLength(biggest, True)
+    approx = cv2.approxPolyDP(biggest, 0.02 * peri, True)
+    if len(approx) == 4:
+        return approx.reshape((4, 2))
+    else:
+        return None
+
+def warp_perspective(img, corners):
+    rect = np.zeros((4, 2), dtype="float32")
+    s = corners.sum(axis=1)
+    rect[0] = corners[np.argmin(s)]
+    rect[2] = corners[np.argmax(s)]
+    diff = np.diff(corners, axis=1)
+    rect[1] = corners[np.argmin(diff)]
+    rect[3] = corners[np.argmax(diff)]
+    (tl, tr, br, bl) = rect
+    width = int(max(np.linalg.norm(br - bl), np.linalg.norm(tr - tl)))
+    height = int(max(np.linalg.norm(tr - br), np.linalg.norm(tl - bl)))
+    dst = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype="float32")
+    M = cv2.getPerspectiveTransform(rect, dst)
+    warped = cv2.warpPerspective(img, M, (width, height))
+    return warped
+
+def get_contour_from_image(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+        return max(contours, key=cv2.contourArea)
+    return None
+    
+    
+    # --- ???? ???????? ?? ????? ??? C ---
+def capture_child_drawing():
+    captured = False
+    while not captured:
+        frame = picam2.capture_array()
+        corners = detect_paper(frame)
+        display = frame.copy()
+        if corners is not None:
+            cv2.drawContours(display, [corners.astype(int)], -1, (0, 255, 0), 2)
+            cv2.putText(display, "Press C to capture", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        else:
+            cv2.putText(display, "No paper detected", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+        cv2.imshow("Camera", display)
+        key = cv2.waitKey(1)
+        if key == ord('c') and corners is not None:
+            warped = warp_perspective(frame, corners)
+            sharpened = cv2.detailEnhance(warped, sigma_s=10, sigma_r=0.15)
+            cv2.imwrite(SAVE_PATH, sharpened)
+            print(f"[SUCCESS] Image saved to: {SAVE_PATH}")
+            captured = True
+    cv2.destroyAllWindows()
+    return sharpened
+
+# --- ???????? ?????? ---
+print("[INFO] Capture initial drawing...")
+child_image = capture_child_drawing()
+
+# --- ???????? ??????? ????? ?? ????????? ---
+print("[INFO] Waiting for shape selection from Arduino...")
+
+while True:
+    if ser.in_waiting > 0:
+        raw = ser.readline()
+        try:
+            key = raw.decode('ascii').strip()
+        except UnicodeDecodeError:
+            continue
+
+        if key in ['1','2','3','4']:
+            print(f"[INFO] Shape selected from Arduino: {key}")
+            files = glob.glob(f"/home/pi/drawing_game/drawings/target_shape_{key}*")
+            if not files:
+                print(f"[ERROR] No file found for shape {key}")
+                continue
+
+            target_path = files[0]
+            target_img = cv2.imread(target_path)
+            if target_img is None:
+                print(f"[ERROR] Could not read {target_path}")
+                continue
+            target_contour = get_contour_from_image(target_img)
+
+            # --- loop ?????? ???????? ??? ???? ?????? ?????? ---
+            while True:
+                child_contour = get_contour_from_image(child_image)
+                if target_contour is not None and child_contour is not None:
+                    similarity_score = cv2.matchShapes(child_contour, target_contour, cv2.CONTOURS_MATCH_I1, 0.0)
+                    print(f"[RESULT] Similarity score for shape {key}: {similarity_score:.4f}")
+
+                    if similarity_score < 0.2:
+                        ser.write(b"EXCELLENT\n")
+                        break
+                    elif similarity_score < 0.4:
+                        ser.write(b"GOOD\n")
+                        break
+                    else:
+                        ser.write(b"RETRY\n")
+                        print("[INFO] Please redraw the shape.")
+                        # --- ????? ???????? ---
+                        child_image = capture_child_drawing()
+                else:
+                    print("[WARNING] Could not extract contours for comparison.")
