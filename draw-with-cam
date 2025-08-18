@@ -1,6 +1,14 @@
 #include <Servo.h>
 #include <Keypad.h>
 #include <math.h>  // لدوال cos و sin
+#include <SoftwareSerial.h> 
+#include <DFRobotDFPlayerMini.h> 
+// --- DFPlayer --- 
+#define SFX_RX 50
+ #define SFX_TX 51
+SoftwareSerial DFSerial(SFX_RX, SFX_TX);
+DFRobotDFPlayerMini myDFPlayer;
+byte sfxVolume = 25;
 
 // --- الموتور X ---
 #define STEP_PIN_X 4
@@ -201,6 +209,13 @@ void runRobotSequence(char shape) {
 void setup() {
   Serial.begin(9600);
 
+// DFPlayer setup
+  DFSerial.begin(9600);
+  if (!myDFPlayer.begin(DFSerial)) {
+     Serial.println("DFPlayer Mini not detected!");
+      while (true);
+  }
+  myDFPlayer.volume(sfxVolume);
   pinMode(STEP_PIN_X, OUTPUT);
   pinMode(DIR_PIN_X, OUTPUT);
   pinMode(ENA_PIN_X, OUTPUT);
@@ -233,4 +248,18 @@ void loop() {
       runRobotSequence(key);
     }
   }
+
+ if (Serial.available() > 0) {
+    String feedback = Serial.readStringUntil('\n');
+    feedback.trim();
+
+    if (feedback == "EXCELLENT") {
+      myDFPlayer.play(1); // ملف صوت ممتاز
+    } else if (feedback == "GOOD") {
+      myDFPlayer.play(2); // ملف صوت جيد
+    } else if (feedback == "RETRY") {
+      myDFPlayer.play(3); // ملف صوت أعد الرسم
+    }
+  }
+  
 }
