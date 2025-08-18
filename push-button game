@@ -1,0 +1,244 @@
+#include <Servo.h>
+#include <Keypad.h>
+#include <SoftwareSerial.h>
+#include <DFRobotDFPlayerMini.h>
+
+// --- DFPlayer Mini ---
+#define SFX_RX 50
+#define SFX_TX 51
+SoftwareSerial DFSerial(SFX_RX, SFX_TX);
+DFRobotDFPlayerMini myDFPlayer;
+byte sfxVolume = 25;
+
+// --- الكيباد ---
+const byte ROWS = 4;
+const byte COLS = 4;
+char hexaKeys[ROWS][COLS] = {
+  {'B','A','3','A'},
+  {'6','3','6','B'},
+  {'5','2','9','C'},
+  {'4','1','#','D'}
+};
+byte rowPins[ROWS] = {44, 45, 46, 47};
+byte colPins[COLS] = {48, 49, 7, 6};
+Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
+
+// --- الأزرار واللمبات للألعاب ---
+#define LED1_PIN 37
+#define BUTTON1_PIN 36
+#define LED2_PIN 38
+#define BUTTON2_PIN 39
+#define LED3_PIN 41
+#define BUTTON3_PIN 40
+#define LED4_PIN 42
+#define BUTTON4_PIN 43
+
+#define NUM_BUTTONS 4
+int ledPins[NUM_BUTTONS]   = {LED1_PIN, LED2_PIN, LED3_PIN, LED4_PIN};
+int buttonPins[NUM_BUTTONS]= {BUTTON1_PIN, BUTTON2_PIN, BUTTON3_PIN, BUTTON4_PIN};
+
+// --- متغير لتحديد المود الحالي ---
+int currentMode = 0;
+
+// --- نمط للعبة Simon Says ---
+int pattern[] = {0, 2, 3, 1};
+int patternLength = sizeof(pattern) / sizeof(pattern[0]);
+
+// ---------------- إعداد ----------------
+void setup() {
+  Serial.begin(9600);
+
+  // DFPlayer
+  DFSerial.begin(9600);
+  if (!myDFPlayer.begin(DFSerial)) {
+    Serial.println("DFPlayer Mini not detected!");
+    while (true);
+  }
+  myDFPlayer.volume(sfxVolume);
+
+  // LEDs & Buttons
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    pinMode(ledPins[i], OUTPUT);
+    pinMode(buttonPins[i], INPUT_PULLUP);
+  }
+
+  randomSeed(analogRead(0)); // للعشوائي
+  Serial.println("اضغط B للترحيب واختيار المود.");
+}
+
+// ---------------- اللوب الرئيسي ----------------
+void loop() {
+  char key = customKeypad.getKey();
+  if (key) {
+    Serial.print("Keypad pressed: ");
+    Serial.println(key);
+
+    if (key == 'B') {
+      currentMode = 0;
+      myDFPlayer.play(10); // ملف صوت ترحيب
+      Serial.println("مرحبا! اختار مود: 4=Simon Says , 5=Random Button");
+    }
+    else if (key == '4') {
+      currentMode = 4;
+      Serial.println("مود 4: Simon Says");
+      runSimonSays();
+    }
+    else if (key == '5') {
+      currentMode = 5;
+      Serial.println("مود 5: Random Button");
+      runRandomButton();
+    }
+  }
+}
+
+// ---------------- لعبة 4: Simon Says ----------------
+void runSimonSays() {
+  myDFPlayer.play(8); // صوت البداية
+  delay(6500);
+
+  while (currentMode == 4) { // يضل شغال لحد ما يغير المود
+    playPattern();
+    delay(1000);
+
+    myDFPlayer.play(7); // "دورك"
+    delay(1000);
+
+    bool success = getUserInput();
+    if (success) {
+      myDFPlayer.play(3); // مبروك
+      delay(3500);
+      myDFPlayer.play(1); // فزت
+      delay(3500);
+    } else {
+      myDFPlayer.play(6); // خسرت
+      delay(1500);
+      myDFPlayer.play(2); // "خلصت الجولة"
+      delay(3000);
+    }
+
+    delay(3000);
+
+    // فحص زر المود الجديد أو العودة للقائمة
+    char key = customKeypad.getKey();
+    if (key == '5') {
+      currentMode = 5;
+      Serial.println("تم التبديل لمود 5: Random Button");
+      runRandomButton();
+      break;
+    } else if (key == 'B') {
+      currentMode = 0;
+      Serial.println("رجعت للقائمة الرئيسية");
+      break;
+    }
+  }
+}
+
+void playPattern() {
+  for (int i = 0; i < patternLength; i++) {
+    int ledIndex = pattern[i];
+    digitalWrite(ledPins[ledIndex], HIGH);
+    delay(700);
+    digitalWrite(ledPins[ledIndex], LOW);
+    delay(300);
+  }
+}
+
+bool getUserInput() {
+  for (int i = 0; i < patternLength; i++) {
+    int expectedButton = buttonPins[pattern[i]];
+    bool pressedCorrect = false;
+
+    while (!pressedCorrect) {
+      for (int b = 0; b < NUM_BUTTONS; b++) {
+        if (digitalRead(buttonPins[b]) == LOW) {
+          Serial.print("Button pressed: B");
+          Serial.println(b+1);
+
+          if (buttonPins[b] == expectedButton) {
+            pressedCorrect = true;
+            myDFPlayer.play(4);
+            while (digitalRead(buttonPins[b]) == LOW) delay(10);
+            break;
+          } else {
+            // myDFPlayer.play(6);
+            // delay(1500);
+            // myDFPlayer.play(2); // خسرت
+            // delay(3500);
+            return false;
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
+// ---------------- لعبة 5: Random Button ----------------
+void runRandomButton() {
+  myDFPlayer.play(8); // صوت البداية
+  while (currentMode == 5) {  // يضل شغال لحد ما يغير المود
+    int choice = random(NUM_BUTTONS);
+    Serial.print("Random LED chosen: L");
+    Serial.println(choice+1);
+
+    runButtonRound(ledPins[choice], buttonPins[choice], 5000);
+    delay(1500);
+
+    // فحص زر المود الجديد أو العودة للقائمة
+    char key = customKeypad.getKey();
+    if (key == '4') {
+      currentMode = 4;
+      Serial.println("تم التبديل لمود 4: Simon Says");
+      runSimonSays();
+      break;
+    } else if (key == 'B') {
+      currentMode = 0;
+      Serial.println("رجعت للقائمة الرئيسية");
+      break;
+    }
+  }
+}
+
+void runButtonRound(int ledPin, int buttonPin, unsigned long duration) {
+  digitalWrite(ledPin, HIGH);
+
+  unsigned long startTime = millis();
+  bool pressedCorrect = false;
+  bool pressedWrong = false;
+
+  while (millis() - startTime < duration) {
+    for (int b = 0; b < NUM_BUTTONS; b++) {
+      if (digitalRead(buttonPins[b]) == LOW) {
+        if (buttonPins[b] == buttonPin) {
+          pressedCorrect = true;
+          Serial.print("Button pressed: B");
+          Serial.println(b+1);
+        } else {
+          pressedWrong = true;
+          Serial.print("Wrong button pressed: B");
+          Serial.println(b+1);
+        }
+
+        while (digitalRead(buttonPins[b]) == LOW) delay(10);
+        goto checkResult;
+      }
+    }
+  }
+
+checkResult:
+  digitalWrite(ledPin, LOW);
+
+  if (pressedCorrect) {
+    myDFPlayer.play(4); // فوز
+    Serial.println("✅ صح! فزت");
+  } else {
+    myDFPlayer.play(6); // خسارة
+    if (pressedWrong) {
+      Serial.println("❌ زر غلط! خسرت");
+    } else {
+      Serial.println("⌛ انتهى الوقت بدون كبسة! خسرت");
+    }
+  }
+
+  delay(2000);
+}
