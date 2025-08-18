@@ -216,6 +216,7 @@ void setup() {
       while (true);
   }
   myDFPlayer.volume(sfxVolume);
+   myDFPlayer.play(9);
   pinMode(STEP_PIN_X, OUTPUT);
   pinMode(DIR_PIN_X, OUTPUT);
   pinMode(ENA_PIN_X, OUTPUT);
@@ -244,7 +245,13 @@ void loop() {
     Serial.println(key);  // للعرض على المراقبة
 
     if (key >= '1' && key <= '4') {
-      Serial.println(key);  // إرسال الرقم كـ نص مع نهاية سطر
+      Serial.println(key);
+      switch(key) {
+        case '1': myDFPlayer.play(11); break; // مربع
+        case '2': myDFPlayer.play(12); break; // خط مائل
+        case '3': myDFPlayer.play(12); break; // مثلث
+        case '4': myDFPlayer.play(10); break; // دائرة
+    }  // إرسال الرقم كـ نص مع نهاية سطر
       runRobotSequence(key);
     }
   }
@@ -254,12 +261,15 @@ void loop() {
     feedback.trim();
 
     if (feedback == "EXCELLENT") {
-      myDFPlayer.play(1); // ملف صوت ممتاز
+      myDFPlayer.play(13); // ملف صوت ممتاز
     } else if (feedback == "GOOD") {
-      myDFPlayer.play(2); // ملف صوت جيد
+      myDFPlayer.play(14); // ملف صوت جيد
     } else if (feedback == "RETRY") {
-      myDFPlayer.play(3); // ملف صوت أعد الرسم
+      myDFPlayer.play(15); // ملف صوت أعد الرسم
     }
   }
   
 }
+
+
+
