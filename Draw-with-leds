@@ -35,13 +35,13 @@ const unsigned int STEP_DELAY_US = 500;
 const byte ROWS = 4;
 const byte COLS = 4;
 char hexaKeys[ROWS][COLS] = {
-  {'B','A','3','A'},
-  {'6','3','6','B'},
-  {'5','2','9','C'},
-  {'4','1','#','D'}
-};
+  {'B','A','D','C'},
+  {'6','3','#','9'},
+  {'5','2','0','8'},
+  {'4','1','*','7'}
+}; 
 byte rowPins[ROWS] = {44, 45, 46, 47}; 
-byte colPins[COLS] = {48, 49, 7, 6};
+byte colPins[COLS] = {48, 49, 52, 53};
 Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
 
 // --- RGB RELAY ---
@@ -262,21 +262,66 @@ void setup() {
   Serial.println("Arduino جاهز. اضغط '1'=مربع, '2'=خط مائل, '3'=مثلث, '4'=دائرة.");
 }
 
+// --- متغيرات جديدة لتتبع وضع اللعبة ---
+bool gameStarted = false;   // هل تم الضغط على 'D' وبدأ اختيار المستوى
+int selectedLevel = 0;      // المستوى المختار: 1 أو 2
+
+
 void loop() {
   char key = customKeypad.getKey();
   if (key) {
-    Serial.print("Pressed key: ");
+    
     Serial.println(key);  // للعرض على المراقبة
 
-    if (key >= '1' && key <= '4') {
-      Serial.println(key);
-      switch(key) {
-        case '1': myDFPlayer.play(11); break; // مربع
-        case '2': myDFPlayer.play(12); break; // خط مائل
-        case '3': myDFPlayer.play(12); break; // مثلث
-        case '4': myDFPlayer.play(10); break; // دائرة
-    }  // إرسال الرقم كـ نص مع نهاية سطر
-      runRobotSequence(key);
+     if (!gameStarted && key == 'D') {
+      // بدأ اللعبة
+      myDFPlayer.play(20); // صوت بداية اللعبة
+      gameStarted = true;
+      selectedLevel = 0;
+      Serial.println("اللعبة بدأت، اختر المستوى: 7=الأول, 8=الثاني");
+    } 
+    else if (gameStarted && selectedLevel == 0) {
+      // اختيار المستوى بعد الضغط على D
+      if (key == '7') {
+        selectedLevel = 1;
+        Serial.println("تم اختيار المستوى الأول");
+        myDFPlayer.play(21); // صوت تأكيد المستوى الأول
+      } else if (key == '8') {
+        selectedLevel = 2;
+        Serial.println("تم اختيار المستوى الثاني");
+        myDFPlayer.play(22); // صوت تأكيد المستوى الثاني
+      }
+    } 
+    else if (selectedLevel != 0) {
+      // بعد اختيار المستوى، تنفيذ الرسم حسب الزر
+      char shapeKey = key;
+      // ربط الأزرار بالمستوى
+      if (shapeKey == '1' && selectedLevel == 1) runRobotSequence('1'); // مربع مستوى 1
+      else if (shapeKey == '8' && selectedLevel == 1) runRobotSequence('1'); // مربع مستوى 1 (حسب طلبك الرقم 8)
+      else if (shapeKey == '2' && selectedLevel == 2) runRobotSequence('1'); // مربع مستوى 2
+      else if (shapeKey == '3' && selectedLevel == 2) runRobotSequence('3'); // مثلث مستوى 2
+      else if (shapeKey == '9' && selectedLevel == 2) runRobotSequence('3'); // مثلث مستوى 2
+      // أرسل الزر الفعلي الذي ضغطه للراسبيري
+     Serial.write(shapeKey);  // هذا للإشارة للبايثون
+
+      // إضافة أصوات حسب الشكل إذا أردت
+      // بعد الرسم يمكن إعادة تعيين اللعبة
+      gameStarted = false;
+      selectedLevel = 0;
+      Serial.println("انتهى الرسم، الرجاء الضغط على D لبدء لعبة جديدة");
+    } 
+    else {
+      // الأزرار العادية خارج اللعبة
+      if (key >= '1' && key <= '4') {
+        Serial.println(key);
+        switch(key) {
+          case '1': myDFPlayer.play(11); break;
+          case '2': myDFPlayer.play(12); break;
+          case '3': myDFPlayer.play(12); break;
+          case '4': myDFPlayer.play(10); break;
+        }
+        runRobotSequence(key);
+      }
     }
   }
 
@@ -287,16 +332,15 @@ void loop() {
 
     if (feedback == "EXCELLENT") {
       myDFPlayer.play(13); 
-      setColor(0, 1, 0); // أخضر
+      setColor(0, 1, 0);
     } else if (feedback == "GOOD") {
       myDFPlayer.play(14); 
-      setColor(0, 0, 1); // أزرق
+      setColor(0, 0, 1);
     } else if (feedback == "RETRY") {
       myDFPlayer.play(15); 
-      setColor(1, 0, 1); // أحمر
+      setColor(1, 0, 1);
     } else {
-      setColor(0, 0, 0); // إطفاء
+      setColor(0, 0, 0);
     }
   }
 }
-
