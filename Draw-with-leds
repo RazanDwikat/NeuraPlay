@@ -113,7 +113,7 @@ void homeY() {
 void liftGripper() { servo1.write(60); delay(300); }
 void lowerGripperToGrab() { servo1.write(20); delay(300); }
 void openGripper() { servo3.write(60); delay(300); }
-void closeGripper() { servo3.write(2); delay(300); }
+void closeGripper() { servo3.write(0); delay(300); }
 void resetServosToStart() { servo1.write(0); servo2.write(90); servo3.write(60); delay(500); }
 
 // --- دالة للتحريك لأي نقطة ---
@@ -133,7 +133,7 @@ void moveTo(int targetX, int targetY) {
 
 // --- رسم المربع ---
 void drawSquare(int startX, int startY, int L,int M) {
-  liftGripper();       
+  // liftGripper();       
   moveTo(startX, startY); 
   lowerGripperToGrab();   
   moveTo(startX, startY - M);     
@@ -207,13 +207,19 @@ void runRobotSequence(char shape) {
   homeX();
 
   openGripper();
+  servo1.write(70);
   moveStepsX(16000, HIGH);
-  servo1.write(40);
+  servo1.write(45);
+  delay(2000);
+  closeGripper();
   delay(1000);
-  servo1.write(55);
+  servo1.write(35);
+  servo1.write(40);
+  servo1.write(45);
+  servo1.write(65);
   moveStepsX(9500, LOW);
   servo2.write(140);
-  servo1.write(20);
+  servo1.write(100);
 
   if (shape == '1') drawSquare(currentX, currentY, 3000, 700);
   else if (shape == '2') drawDiagonalLine(0, 0, 2000, 1000, 2000);
@@ -297,11 +303,11 @@ void loop() {
       char shapeKey = key;
       // ربط الأزرار بالمستوى
       if (shapeKey == '1' && selectedLevel == 1) runRobotSequence('1'); // مربع مستوى 1
-      else if (shapeKey == '8' && selectedLevel == 1) runRobotSequence('1'); // مربع مستوى 1 (حسب طلبك الرقم 8)
-      else if (shapeKey == '2' && selectedLevel == 2) runRobotSequence('1'); // مربع مستوى 2
-      else if (shapeKey == '3' && selectedLevel == 2) runRobotSequence('3'); // مثلث مستوى 2
-      else if (shapeKey == '9' && selectedLevel == 2) runRobotSequence('3'); // مثلث مستوى 2
-      // أرسل الزر الفعلي الذي ضغطه للراسبيري
+      else if (shapeKey == '2' && selectedLevel == 1) runRobotSequence('3'); // مربع مستوى 1 (حسب طلبك الرقم 8)
+      else if (shapeKey == '3' && selectedLevel == 2) runRobotSequence('2'); // مربع مستوى 2
+      // else if (shapeKey == '3' && selectedLevel == 2) runRobotSequence('3'); // مثلث مستوى 2
+      // else if (shapeKey == '9' && selectedLevel == 2) runRobotSequence('3'); // مثلث مستوى 2
+      // // أرسل الزر الفعلي الذي ضغطه للراسبيري
      Serial.write(shapeKey);  // هذا للإشارة للبايثون
 
       // إضافة أصوات حسب الشكل إذا أردت
