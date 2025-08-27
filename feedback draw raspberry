@@ -1,0 +1,100 @@
+import cv2
+import time
+import serial
+from picamera2 import Picamera2
+import requests
+
+# --- Serial to Arduino ---
+ser = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+
+# --- ????? Picamera2 ---
+picam2 = Picamera2()
+picam2.preview_configuration.main.size = (640, 480)
+picam2.preview_configuration.main.format = "RGB888"
+picam2.configure("preview")
+picam2.start()
+time.sleep(2)  # ??? ?????? ????????
+
+# --- ????? Roboflow ---
+API_KEY = "JJrwJwS9tZFffVeaXIgO"
+MODEL_URL = "https://detect.roboflow.com/neuraplay-z0aky/1"
+PREDICTION_URL = f"{MODEL_URL}?api_key={API_KEY}"
+
+# --- ????? ??????? ??? ????? ?? Arduino ---
+expected_shapes = {
+    '1': 'square',
+    '3': 'house',
+    '2': 'triangle'
+}
+
+# --- ???? ????? ???????? ---
+CONF_THRESHOLD = 0.7  # 70%
+
+# --- ???????? ROI ---
+ROI_X, ROI_Y, ROI_W, ROI_H = 16, 49, 396, 237
+
+def capture_image():
+    frame = picam2.capture_array()
+    # ?? ?????? ??? ROI
+    roi_frame = frame[ROI_Y:ROI_Y+ROI_H, ROI_X:ROI_X+ROI_W]
+    _, img_encoded = cv2.imencode('.jpg', roi_frame)
+    return img_encoded.tobytes(), frame, roi_frame
+
+def predict_shape(image_bytes):
+    files = {"file": ("image.jpg", image_bytes, "image/jpeg")}
+    response = requests.post(PREDICTION_URL, files=files)
+    if response.status_code == 200:
+        predictions = response.json().get("predictions", [])
+        if predictions:
+            pred = predictions[0]
+            return pred["class"], pred["confidence"]
+    return "Unknown", 0.0
+
+print("Waiting for Arduino to send expected shape number...")
+
+while True:
+    if ser.in_waiting > 0:
+        number = ser.readline().decode().strip()
+        if number not in expected_shapes:
+            continue
+
+        expected_shape = expected_shapes[number]
+        print(f"Expected shape: {expected_shape}")
+
+        while True:
+            frame = picam2.capture_array()
+
+            # --- ??? ???? ??? ??? ROI ---
+            display_frame = frame.copy()
+            cv2.rectangle(display_frame, (ROI_X, ROI_Y), (ROI_X+ROI_W, ROI_Y+ROI_H), (0,255,0), 2)
+            cv2.imshow("Live Preview with ROI", display_frame)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                picam2.close()
+                cv2.destroyAllWindows()
+                exit()
+            elif key == ord('c'):
+                img_bytes, frame, roi_frame = capture_image()
+                detected_shape, confidence = predict_shape(img_bytes)
+
+                print(f"Detected: {detected_shape}, Confidence: {confidence*100:.2f}%")
+
+                if detected_shape.lower() == expected_shape.lower() and confidence >= CONF_THRESHOLD:
+                    feedback = "EXCELLENT"
+                else:
+                    feedback = "RETRY"
+
+                print("Feedback:", feedback)
+                ser.write((feedback + "\n").encode())
+
+                # --- ??? ??????? ?? ???? ROI ---
+                cv2.putText(display_frame, f"{detected_shape} {confidence*100:.1f}%", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                cv2.imshow("Captured Shape", display_frame)
+                cv2.waitKey(1500)
+                cv2.destroyWindow("Captured Shape")
+
+                if feedback == "EXCELLENT":
+                    cv2.destroyAllWindows()
+                    break
