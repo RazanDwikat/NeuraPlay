@@ -527,7 +527,8 @@ void drawSquare(int startX, int startY, int L,int M) {
   moveTo(startX, startY - M);  
   moveTo(startX + L, startY - M); 
   moveTo(startX + L, startY);     
-  moveTo(startX, startY);         
+  moveTo(startX, startY);
+  moveTo(startX, startY - M);          
   liftGripper(); 
 }
 
@@ -681,74 +682,130 @@ void runRobotSequence(char shape) {
   }
 
    // --- دالة تشغيل تسلسل الحركة الأساسي ---
-    void runRobotSequencecube() {
-      // ضبط البداية
-      // resetServosToStart();
-      
+void runRobotSequencecube() {
+  // ضبط البداية
+  // resetServosToStart();
 
-      // --- تسلسل 1 ---
-      openGripperCube();
-      liftGripperCube();
-      moveStepsX(11000, HIGH);
-      moveStepsY(1500, LOW, HIGH);
-      lowerGripperToGrabCube();
-      delay(1000);
-      servo1.write(10);
-      closeGripperCube();
-      delay(2000);
-      liftGripperCube();
-      homeX();
-      moveStepsY(1600, HIGH, LOW);
-      lowerGripperToGrabCube();
-      delay(2000);
-      servo3.write(60);
-      delay(1000);
-      servo1.write(15);
+  // --- تسلسل 1 ---
+  openGripperCube();
+  liftGripperCube();
+  moveStepsX(11000, HIGH);
+  moveStepsY(1500, LOW, HIGH);
+  lowerGripperToGrabCube();
+  delay(1000);
+  servo1.write(10);
+  closeGripperCube();
+  delay(2000);
+  liftGripperCube();
+  homeX();
+  moveStepsY(1600, HIGH, LOW);
+  lowerGripperToGrabCube();
+  delay(2000);
+  servo3.write(60);
+  delay(1000);
+  servo1.write(15);
 
-      // --- تسلسل 2 ---
-      homeY();
-      homeX();
-      liftGripperCube();
-      moveStepsX(8300, HIGH);
-      moveStepsY(1500, LOW, HIGH);
-      lowerGripperToGrabCube();
-      delay(1000);
-      servo1.write(10);
-      closeGripperCube();
-      liftGripperCube();
-      homeX();
-      moveStepsY(1750, HIGH, LOW);
-      servo2.write(115);
-      lowerGripperToGrabCube();
-      delay(2000);
-      servo3.write(60);
-      delay(1000);
-      servo1.write(15);
-
-      // --- تسلسل 3 ---
-      homeY();
-      homeX();
-      liftGripperCube();
-      moveStepsX(5700, HIGH);
-      moveStepsY(1850, LOW, HIGH);
-      lowerGripperToGrabCube();
-      delay(1000);
-      servo1.write(10);
-      delay(700);
-      closeGripperCube();
-      liftGripperCube();
-      homeX();
-      moveStepsY(1800, HIGH, LOW);
-      servo2.write(145);
-      lowerGripperToGrabCube();
-      delay(2000);
-      servo3.write(60);
-      delay(1000);
-
-      liftGripperCube();
-
-      Serial.println("انتهت جميع التسلسلات");
+  // --- فحص اللون الأحمر للتسلسل 1 ---
+  while (true) {
+    Serial.println("check_color:1");  // اطلب فحص الأحمر
+    delay(100);  // وقت قصير للسماح للـ Pi بالاستجابة
+    if (Serial.available() > 0) {
+      String feedback = Serial.readStringUntil('\n');
+      feedback.trim();
+      if (feedback == "all_correct") { 
+        setColor(0,1,0);   // أخضر
+        myDFPlayer.play(13);
+        break;  // انتقل للتسلسل التالي
+      }
+      else{
+        setColor(1,0,0);
+        myDFPlayer.play(14);
+      }
     }
+  }
+
+  // --- تسلسل 2 ---
+  homeY();
+  homeX();
+  liftGripperCube();
+  moveStepsX(8300, HIGH);
+  moveStepsY(1500, LOW, HIGH);
+  lowerGripperToGrabCube();
+  delay(1000);
+  servo1.write(10);
+  closeGripperCube();
+  liftGripperCube();
+  homeX();
+  moveStepsY(1750, HIGH, LOW);
+  servo2.write(115);
+  lowerGripperToGrabCube();
+  delay(2000);
+  servo3.write(60);
+  delay(1000);
+  servo1.write(15);
+
+  // --- فحص اللون الأزرق للتسلسل 2 ---
+  while (true) {
+    Serial.println("check_color:2");  // اطلب فحص الأزرق
+    delay(100);
+    if (Serial.available() > 0) {
+      String feedback = Serial.readStringUntil('\n');
+      feedback.trim();
+      if (feedback == "all_correct") { 
+        setColor(0,1,0);
+        myDFPlayer.play(13);
+        break;
+      }
+      else{
+        setColor(1,0,0);
+        myDFPlayer.play(14);
+      }
+    }
+  }
+
+  // --- تسلسل 3 ---
+  homeY();
+  homeX();
+  liftGripperCube();
+  moveStepsX(5700, HIGH);
+  moveStepsY(1850, LOW, HIGH);
+  lowerGripperToGrabCube();
+  delay(1000);
+  servo1.write(10);
+  delay(700);
+  closeGripperCube();
+  liftGripperCube();
+  homeX();
+  moveStepsY(1800, HIGH, LOW);
+  servo2.write(145);
+  lowerGripperToGrabCube();
+  delay(2000);
+  servo3.write(60);
+  delay(1000);
+  liftGripperCube();
+
+  // --- فحص اللون الأصفر للتسلسل 3 ---
+  while (true) {
+    Serial.println("check_color:3");  // اطلب فحص الأصفر
+    delay(100);
+    if (Serial.available() > 0) {
+      String feedback = Serial.readStringUntil('\n');
+      feedback.trim();
+      if (feedback == "all_correct") { 
+        setColor(0,1,0);
+        myDFPlayer.play(13);
+        break;
+      }
+      else{
+        setColor(1,0,0);
+        myDFPlayer.play(14);
+      }
+    }
+  }
+
+  Serial.println("انتهت جميع التسلسلات");
+}
+
 
   void reverseAllSequences() {
     Serial.println("بدء العملية العكسية لكل المكعبات...");
@@ -837,11 +894,13 @@ void startRobotGame() {
       else if (key == '4') { currentMode = 4; return; }
       else if (key == '5') { currentMode = 5; return; }
       else if (key == 'C') { 
-      myDFPlayer.play(21); 
-      resetRobot(); 
-      runRobotSequencecube(); 
-      resetServosToStart(); 
-     }
+    myDFPlayer.play(21);  
+    
+    resetRobot(); 
+    runRobotSequencecube(); 
+    resetServosToStart();
+}
+
      else if (key == '0') { 
       myDFPlayer.play(21); 
       resetRobot(); 
