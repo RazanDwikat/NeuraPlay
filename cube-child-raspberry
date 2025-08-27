@@ -1,0 +1,99 @@
+import cv2
+import numpy as np
+import time
+import serial
+from picamera2 import Picamera2, Preview
+
+# --- Serial to Arduino ---
+ser = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+time.sleep(2)
+
+# --- ????? ???????? ---
+picam2 = Picamera2() 
+picam2.preview_configuration.main.size = (640, 480) 
+picam2.preview_configuration.main.format = "RGB888" 
+picam2.configure("preview") 
+picam2.start() 
+time.sleep(2)
+
+# --- ?????? ????? HSV ---
+color_ranges = {
+    "red": [([0, 120, 70], [10, 255, 255]), ([170, 120, 70], [180, 255, 255])],
+    "blue": ([100, 150, 50], [140, 255, 255]),
+    "yellow": ([20, 100, 100], [30, 255, 255])
+}
+
+# --- ????? ROI ??? ???? ---
+positions = {
+    "pos1": (50, 350, 100, 100),
+    "pos2": (200, 350, 100, 100),
+    "pos3": (350, 350, 100, 100)
+}
+
+# --- ????? ??? ??????? ---
+sequence_colors = {
+    1: "red",
+    2: "blue",
+    3: "yellow"
+}
+
+# --- ???? ??? ????? ?? ROI ---
+def check_color(frame, roi, color_name):
+    x, y, w, h = roi
+    crop = frame[y:y+h, x:x+w]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+
+    if color_name == "red":
+        mask1 = cv2.inRange(hsv, np.array(color_ranges["red"][0][0]), np.array(color_ranges["red"][0][1]))
+        mask2 = cv2.inRange(hsv, np.array(color_ranges["red"][1][0]), np.array(color_ranges["red"][1][1]))
+        mask = cv2.bitwise_or(mask1, mask2)
+    else:
+        lower, upper = color_ranges[color_name]
+        mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+
+    count = cv2.countNonZero(mask)
+    return count > 500  # threshold ????
+
+print("Press 'q' to quit.")
+
+while True:
+    frame = picam2.capture_array()
+
+    # --- ???? ?? ????? ????? ??????? ?? Arduino ---
+    if ser.in_waiting > 0:
+        line = ser.readline().decode().strip()
+        if line.startswith("check_color:"):
+            seq = int(line.split(":")[1])
+            color_to_check = sequence_colors[seq]
+
+            # ????? ROI ??? ?????
+            if color_to_check == "red":
+                roi = positions["pos1"]
+            elif color_to_check == "blue":
+                roi = positions["pos2"]
+            elif color_to_check == "yellow":
+                roi = positions["pos3"]
+
+            correct = check_color(frame, roi, color_to_check)
+
+            # ????? ???? ??? Arduino
+            if correct:
+                ser.write(b"all_correct\n")  # ????? ???? ? ????
+            else:
+                ser.write(b"error\n")        # ??? ? ????
+
+            # ??? ???????? ?????? ?????
+            x, y, w, h = roi
+            color_rect = (0, 255, 0) if correct else (0, 0, 255)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), color_rect, 2)
+            cv2.putText(frame, color_to_check, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_rect, 2)
+
+    cv2.imshow("Color Detection", frame)
+
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord('q'):
+        break
+
+picam2.close()
+cv2.destroyAllWindows()
+ser.close()
