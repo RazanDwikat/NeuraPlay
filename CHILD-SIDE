@@ -1,0 +1,1125 @@
+#include <Servo.h>
+#include <Keypad.h>
+#include <math.h>
+#include <SoftwareSerial.h> 
+#include <DFRobotDFPlayerMini.h>
+
+// --- DFPlayer ---
+#define SFX_RX 50
+#define SFX_TX 51
+SoftwareSerial DFSerial(SFX_RX, SFX_TX);
+DFRobotDFPlayerMini myDFPlayer;
+byte sfxVolume = 25;
+
+// --- الكيباد الموحد ---
+const byte ROWS = 4;
+const byte COLS = 4;
+char hexaKeys[ROWS][COLS] = {
+  {'B','A','D','C'},
+  {'6','3','#','9'},
+  {'5','2','0','8'},
+  {'4','1','*','7'}
+}; 
+byte rowPins[ROWS] = {44, 45, 46, 47}; 
+byte colPins[COLS] = {48, 49, 52, 53};
+Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
+
+// --- LEDs + Buttons للألعاب ---
+#define LED1_PIN 37
+#define BUTTON1_PIN 36
+#define LED2_PIN 38
+#define BUTTON2_PIN 39
+#define LED3_PIN 41
+#define BUTTON3_PIN 40
+#define LED4_PIN 42
+#define BUTTON4_PIN 43
+
+#define NUM_BUTTONS 4
+int ledPins[NUM_BUTTONS]   = {LED1_PIN, LED2_PIN, LED3_PIN, LED4_PIN};
+int buttonPins[NUM_BUTTONS]= {BUTTON1_PIN, BUTTON2_PIN, BUTTON3_PIN, BUTTON4_PIN};
+
+// --- الموتور X ---
+#define STEP_PIN_X 4
+#define DIR_PIN_X 14
+#define ENA_PIN_X 2
+#define LIMIT_SWITCH_X1 5
+#define LIMIT_SWITCH_X2 6
+
+// --- الموتور Y ---
+#define STEP_PIN_Y 9
+#define DIR_PIN_Y1 8
+#define DIR_PIN_Y2 11
+#define LIMIT_SWITCH_Y1 22
+#define LIMIT_SWITCH_Y2 23
+
+#define STEP_PIN_EXTRA 20
+#define DIR_PIN_EXTRA 19
+#define EN_PIN_EXTRA 18
+
+
+#define TRIG_PIN 25
+#define ECHO_PIN 24
+
+
+// --- السيرفو الجديد على البن 13 ---
+Servo servoExtra;  
+
+long readUltrasonicCM() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 20000); // timeout 20ms
+  long distance = duration * 0.034 / 2; // cm
+  return distance;
+}
+
+// --- السيرفو ---
+Servo servo1;  
+Servo servo2;  
+Servo servo3;  
+
+// --- RGB RELAY ---
+const int R_PIN = 15;
+const int G_PIN = 16;
+const int B_PIN = 17;
+const bool ACTIVE_LOW = true;
+int RELAY_ON, RELAY_OFF;
+
+// --- إعدادات ---
+const unsigned int STEP_DELAY_US =350;
+int currentMode = 0; // 0=menu, 4=Simon, 5=Random, 9=Robot
+int currentX = 0;
+int currentY = 0;
+
+
+// --- Simon Says ---
+const int patternLength = 4;   // طول النمط (ممكن تكبرو/تصغرو)
+int pattern[patternLength];    // مصفوفة النمط
+
+
+// --- متغيرات لعبة الروبوت ---
+bool gameStarted = false;
+int selectedLevel = 0;
+
+// ----------------- DFPlayer + LEDs Setup -----------------
+void setup() {
+  Serial.begin(9600);
+
+  // DFPlayer
+  DFSerial.begin(9600);
+  if (!myDFPlayer.begin(DFSerial)) {
+    Serial.println("DFPlayer Mini not detected!");
+    while (true);
+  }
+  myDFPlayer.volume(sfxVolume);
+
+  // LEDs & Buttons
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    pinMode(ledPins[i], OUTPUT);
+    pinMode(buttonPins[i], INPUT_PULLUP);
+  }
+
+  // محركات
+  pinMode(STEP_PIN_X, OUTPUT);
+  pinMode(DIR_PIN_X, OUTPUT);
+  pinMode(ENA_PIN_X, OUTPUT);
+  pinMode(LIMIT_SWITCH_X1, INPUT_PULLUP);
+  pinMode(LIMIT_SWITCH_X2, INPUT_PULLUP);  // استخدام Pull-up داخلي
+  digitalWrite(ENA_PIN_X, LOW);
+
+  pinMode(STEP_PIN_Y, OUTPUT);
+  pinMode(DIR_PIN_Y1, OUTPUT);
+  pinMode(DIR_PIN_Y2, OUTPUT);
+  pinMode(LIMIT_SWITCH_Y1, INPUT_PULLUP);
+  pinMode(LIMIT_SWITCH_Y2, INPUT_PULLUP);
+
+  // الموتور الإضافي
+  pinMode(STEP_PIN_EXTRA, OUTPUT);
+  pinMode(DIR_PIN_EXTRA, OUTPUT);
+  pinMode(EN_PIN_EXTRA, OUTPUT);
+
+  digitalWrite(EN_PIN_EXTRA, LOW);   // تفعيل الدرايفر
+  digitalWrite(DIR_PIN_EXTRA, HIGH);  // اتجاه الدوران
+
+  servo1.attach(30);
+  servo2.attach(31);
+  servo3.attach(35);
+  servoExtra.attach(13);
+
+  servo1.write(60);
+  servo2.write(60);
+  servo3.write(0);
+  RELAY_ON  = ACTIVE_LOW ? LOW  : HIGH;
+  RELAY_OFF = ACTIVE_LOW ? HIGH : LOW;
+  pinMode(R_PIN, OUTPUT);
+  pinMode(G_PIN, OUTPUT);
+  pinMode(B_PIN, OUTPUT);
+  setColor(1,1,1);
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  randomSeed(analogRead(0));
+  Serial.println("✅ جاهز. اضغط B لقائمة ألعاب الأزرار أو D لقائمة الرسم.");
+  myDFPlayer.play(20);
+}
+
+
+unsigned long lastCheck = 0;
+const int CHECK_INTERVAL = 1000; // كل 100ms
+
+void checkSafetyStop() {
+  if (millis() - lastCheck < CHECK_INTERVAL) return; // ما تفحص إلا كل 100ms
+  lastCheck = millis();
+
+  long d = readUltrasonicCM();
+  if (d > 0 && d < 10) {
+    while (true) {
+      long d2 = readUltrasonicCM();
+      if (d2 > 15) break;  // يظل واقف لحد ما يبعد أكتر من 15سم
+      delay(50);           // فحص سريع بدون بطء
+    }
+  }
+}
+
+
+ void resetRobot() {
+    homeX();
+    homeY();
+    resetServosToStart();
+  }
+
+// --------- ????? ???????? ??????? ---------
+#define MAX_POSITIONS 10
+String positionsQueue[MAX_POSITIONS];
+int queueCount = 0;
+
+// ????? ???????? ?? ????? ????????
+void handleCubeToken(String token) {
+  if (queueCount < MAX_POSITIONS) {
+    positionsQueue[queueCount++] = token;
+  }
+}
+
+// ????? ?? ?????????? ????????
+void processQueue() {
+  for (int i = 0; i < queueCount; i++) {
+    String pos = positionsQueue[i];
+    Serial.print("Moving to: "); Serial.println(pos);
+    int targetX = 0;
+    int targetY = 0;
+
+    if (pos == "pos1") { targetX = 31500; targetY = 0; } 
+    else if (pos == "pos2") { targetX = 31500; targetY = 500; } 
+    else if (pos == "pos3") { targetX = 31500; targetY = 1000; }
+
+    myDFPlayer.play(5); 
+    openGripperCube();
+    liftGripperCube();           
+    moveTo(targetX, targetY);    
+    lowerGripperToGrabCube();
+    delay(1000);
+    servo1.write(10);
+    closeGripperCube();
+    delay(2000);
+    liftGripperCube();
+    moveStepsY(1600, LOW, HIGH);
+    lowerGripperToGrabCube(); // ??? ??? ?????? ??? ??????
+    delay(3000);               // ??? ?????? ??? ???????? ???????? ???????
+  }
+  queueCount = 0;  // ????? ????? ??????? ??? ???????
+}
+
+void runSingleCubeSequence(int seq, bool firstCube) {
+  liftGripperCube();
+
+  int targetX = 0;
+  int targetY = 0;
+
+  // تحديد إحداثيات النقل حسب الموقع
+  if(seq == 1) { targetX = 4000; targetY = 1500; servo2.write(23); }
+  else if(seq == 2) { targetX = 6000; targetY = 1500; servo2.write(70); }
+  else if(seq == 3) { targetX = 6000; targetY = 1500; servo2.write(120); }
+
+  // حركة أول مكعب للأمام
+  if(firstCube) {
+    moveStepsX(31800, HIGH);
+  }
+
+  // التقاط المكعب
+  lowerGripperToGrabCube();
+  delay(1000);
+  closeGripperCube();
+  liftGripperCube();
+
+  // نقل المكعب للموقع المحدد
+  moveStepsX(targetX, LOW);
+  moveStepsY(targetY, LOW, HIGH);
+
+  // وضع المكعب
+  lowerGripperToGrabCube();
+  delay(1000);
+  openGripperCube();
+  liftGripperCube();
+
+  if(seq == 2 || seq == 3) {
+    servo2.write(23);   // ???? ??????? ??????????
+    delay(500);        // ????? ??? ??? ???? ??????
+  }
+
+  // الرجوع لنقطة الالتقاط
+  moveStepsY(targetY, HIGH, LOW);
+  moveStepsX(targetX, HIGH);
+}
+
+void autoCollectCubes() {
+  bool firstCube = true;
+
+  while(true) {
+    Serial.println("request_cube_position");
+    delay(200);
+
+    if(Serial.available() > 0) {
+      String response = Serial.readStringUntil('\n');
+      response.trim();
+      Serial.print("رد الراسبيري: "); Serial.println(response);
+
+      if(response == "none") {
+        Serial.println("✅ انتهت كل المكعبات. القيام بالـ Homing.");
+        homeX();
+        homeY();
+        break;
+      }
+
+      int start = 0;
+      while(start < response.length()) {
+        int commaIndex = response.indexOf(',', start);
+        String token;
+        if(commaIndex == -1) {
+          token = response.substring(start);
+          start = response.length();
+        } else {
+          token = response.substring(start, commaIndex);
+          start = commaIndex + 1;
+        }
+        token.trim();
+
+        if(token.startsWith("pos1")) {
+          Serial.println("📍 لقيت مكعب بالموقع 1 → التقطه");
+          runSingleCubeSequence(1, firstCube);
+          firstCube = false;
+        }
+        else if(token.startsWith("pos2")) {
+          Serial.println("📍 لقيت مكعب بالموقع 2 → التقطه");
+          runSingleCubeSequence(2, firstCube);
+          firstCube = false;
+        }
+        else if(token.startsWith("pos3")) {
+          Serial.println("📍 لقيت مكعب بالموقع 3 → التقطه");
+          runSingleCubeSequence(3, firstCube);
+          firstCube = false;
+        }
+      }
+    }
+    delay(500);
+  }
+}
+
+
+
+// ----------------- LOOP الرئيسي -----------------
+void loop() {
+  
+  char key = customKeypad.getKey();
+  if (key) {
+    // زر A لفحص مكان المكعب والتحرك له
+    if (key == 'A') {
+     myDFPlayer.play(21);
+     resetRobot();
+     autoCollectCubes();   // ← هون بتنادي الدالة الجديدة
+     resetServosToStart();
+    }
+
+  
+    if (key == 'B') {
+      currentMode = 0;
+      myDFPlayer.play(21);
+    }
+    else if (key == '4') { currentMode = 4; runSimonSays(); }
+    else if (key == '5') { currentMode = 5; runRandomButton(); }
+
+    else if (key == 'D') {
+      currentMode = 9;
+      startRobotGame();
+      
+    }
+    else if (key == 'C') {
+      
+      myDFPlayer.play(21); 
+      resetRobot();
+      runRobotSequencecube();
+      resetServosToStart();
+      
+    }
+
+    else if (key == '0') {
+           
+        myDFPlayer.play(21);
+        resetRobot();
+        reverseAllSequences();   // عكس كل التسلسلات
+        resetServosToStart();
+      }
+  }
+
+}
+
+void generateRandomPattern() {
+  for (int i = 0; i < patternLength; i++) {
+    pattern[i] = random(NUM_BUTTONS); // أرقام بين 0 و 3
+  }
+  for (int i = 0; i < patternLength; i++) {
+    Serial.print(pattern[i]);
+    Serial.print(" ");
+  }
+  Serial.println();
+}
+// ----------------- ألعاب Simon & Random -----------------
+// ---------------- لعبة 4: Simon Says ----------------
+void runSimonSays() {
+  myDFPlayer.play(8); // صوت البداية
+  delay(6500);
+
+  generateRandomPattern();   // ✅ توليد النمط العشوائي
+
+  while (currentMode == 4) { 
+    char key = customKeypad.getKey();
+    if (key == '5') { currentMode = 5; return; }
+    else if (key == 'D') { currentMode = 9; return; }
+    else if (key == 'B') { currentMode = 0; return; }
+    else if (key == 'C') { 
+      myDFPlayer.play(21); 
+      resetRobot(); 
+      runRobotSequencecube(); 
+      resetServosToStart(); 
+    }
+    else if (key == '0') { 
+      myDFPlayer.play(21); 
+      resetRobot(); 
+      reverseAllSequences(); 
+      resetServosToStart(); 
+    }
+    playPattern();
+
+
+
+   myDFPlayer.play(7);
+   delay(1000);
+    bool success = getUserInput();
+    if (currentMode != 4) return; //
+   
+
+    myDFPlayer.play(7);
+    delay(1000);
+
+
+    if (success) {
+      setColor(0,1,0);
+      myDFPlayer.play(3); delay(3500);
+      myDFPlayer.play(1); delay(3500);
+      setColor(1,1,1);
+    } else {
+      setColor(1,0,1);
+      myDFPlayer.play(6); delay(1500);
+      myDFPlayer.play(2); delay(3000);
+      setColor(1,1,1);
+    }
+
+    delay(3000);
+  }
+}
+
+void playPattern() {
+  for (int i = 0; i < patternLength; i++) {
+    int ledIndex = pattern[i];
+    digitalWrite(ledPins[ledIndex], HIGH);
+    delay(700);
+    digitalWrite(ledPins[ledIndex], LOW);
+    delay(300);
+
+    char key = customKeypad.getKey();
+    if (key == '5') { currentMode = 5; return; }
+    else if (key == 'D') { currentMode = 9; return; }
+    else if (key == 'B') { currentMode = 0; return; }
+  }
+}
+
+bool getUserInput() {
+  for (int i = 0; i < patternLength; i++) {
+    int expectedButton = buttonPins[pattern[i]];
+    bool pressedCorrect = false;
+
+    while (!pressedCorrect) {
+
+      char key = customKeypad.getKey();
+      if (key == '5') { currentMode = 5; return false; }
+      else if (key == 'D') { currentMode = 9; return false; }
+      else if (key == 'B') { currentMode = 0; return false; }
+      for (int b = 0; b < NUM_BUTTONS; b++) {
+        if (digitalRead(buttonPins[b]) == LOW) {
+          Serial.print("Button pressed: B");
+          Serial.println(b+1);
+
+          if (buttonPins[b] == expectedButton) {
+            pressedCorrect = true;
+            myDFPlayer.play(4);
+            while (digitalRead(buttonPins[b]) == LOW) delay(10);
+            break;
+          } else {
+            return false;
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
+
+// ---------------- لعبة 5: Random Button ----------------
+int streak = 0;                          // عداد الصح المتتالي
+unsigned long roundDelay = 4000;         // الوقت بين الكبسات بالبداية (بين إضاءة وأخرى)
+unsigned long minRoundDelay = 1000;      // أسرع اشي ممكن
+unsigned long maxRoundDelay = 4000;      // أبطأ اشي ممكن
+unsigned long stepChange = 1000;          // مقدار التغيير (يزيد/ينقص)
+
+void runRandomButton() {
+  myDFPlayer.play(22);
+  streak = 0;
+  roundDelay = maxRoundDelay;
+
+  while (currentMode == 5) {
+    char key = customKeypad.getKey();
+    if (key == '4') { currentMode = 4; return; }
+    else if (key == 'D') { currentMode = 9; return; }
+    else if (key == 'B') { currentMode = 0; return; }
+    else if (key == 'C') { 
+      myDFPlayer.play(21); 
+      resetRobot(); 
+      runRobotSequencecube(); 
+      resetServosToStart(); 
+     }
+    else if (key == '0') { 
+      myDFPlayer.play(21); 
+      resetRobot(); 
+      reverseAllSequences(); 
+      resetServosToStart(); 
+    }
+    int choice = random(NUM_BUTTONS);
+    bool correct = runButtonRound(ledPins[choice], buttonPins[choice], 5000); // timeout ثابت 5 ثواني
+
+    if (correct) {
+      streak++;
+      if (streak >= 3) {
+        if (roundDelay > minRoundDelay + stepChange) {
+          roundDelay -= stepChange;   // يخلي الجولة الجاية تيجي أسرع
+        } else {
+          roundDelay = minRoundDelay;
+        }
+        Serial.print("⬆️ Level Up! Round Delay: ");
+        Serial.println(roundDelay);
+        streak = 0; // إعادة العد
+      }
+    } else {
+      streak = 0;
+      if (roundDelay + stepChange <= maxRoundDelay) {
+        roundDelay += stepChange;   // يبطئ شوي
+      } else {
+        roundDelay = maxRoundDelay;
+      }
+      Serial.print("⬇️ Level Down! Round Delay: ");
+      Serial.println(roundDelay);
+    }
+
+    delay(roundDelay);  // 🟢 الوقت بين كل كبسة والتانية
+  }
+}
+
+bool runButtonRound(int ledPin, int buttonPin, unsigned long duration) {
+  digitalWrite(ledPin, HIGH);
+  setColor(1,1,1);
+  unsigned long startTime = millis();
+  bool pressedCorrect = false;
+  bool pressedWrong = false;
+
+  while (millis() - startTime < duration) {
+    char key = customKeypad.getKey();
+    if (key == '4') { currentMode = 4; return false; }
+    else if (key == 'D') { currentMode = 9; return false; }
+    else if (key == 'B') { currentMode = 0; return false; }
+
+    for (int b = 0; b < NUM_BUTTONS; b++) {
+      if (digitalRead(buttonPins[b]) == LOW) {
+        if (buttonPins[b] == buttonPin) {
+          pressedCorrect = true;
+          Serial.println(b+1);
+        } else {
+          pressedWrong = true;
+          Serial.println(b+1);
+        }
+        while (digitalRead(buttonPins[b]) == LOW) delay(10);
+        goto checkResult;
+      }
+    }
+  }
+
+checkResult:
+  digitalWrite(ledPin, LOW);
+
+  if (pressedCorrect) {
+    myDFPlayer.play(4);
+    setColor(0,1,0);
+    return true;
+  } else {
+    myDFPlayer.play(6);
+    setColor(1,0,1);
+    return false;
+  }
+}
+
+// ----------------- دوال الإضاءة -----------------
+void setColor(bool r, bool g, bool b) {
+  digitalWrite(R_PIN, r ? RELAY_ON : RELAY_OFF);
+  digitalWrite(G_PIN, g ? RELAY_ON : RELAY_OFF);
+  digitalWrite(B_PIN, b ? RELAY_ON : RELAY_OFF);
+}
+
+// ----------------- دوال الروبوت -----------------
+
+void moveStepsX(int steps, bool direction) {
+  digitalWrite(DIR_PIN_X, direction);
+  for (int i = 0; i < steps; i++) {
+     checkSafetyStop(); 
+    digitalWrite(STEP_PIN_X, HIGH);
+    delayMicroseconds(STEP_DELAY_US);
+    digitalWrite(STEP_PIN_X, LOW);
+    delayMicroseconds(STEP_DELAY_US);
+  }
+}
+
+void moveStepsY(int steps, bool dirY1, bool dirY2) {
+  digitalWrite(DIR_PIN_Y1, dirY1);
+  digitalWrite(DIR_PIN_Y2, dirY2);
+  for (int i = 0; i < steps; i++) {
+    checkSafetyStop(); 
+    digitalWrite(STEP_PIN_Y, HIGH);
+    delayMicroseconds(STEP_DELAY_US);
+    digitalWrite(STEP_PIN_Y, LOW);
+    delayMicroseconds(STEP_DELAY_US);
+  }
+}
+
+// --- الهومينج ---
+void homeX() {
+  digitalWrite(DIR_PIN_X, LOW);
+  while (digitalRead(LIMIT_SWITCH_X1) == HIGH) {
+    checkSafetyStop(); 
+    digitalWrite(STEP_PIN_X, HIGH);
+    delayMicroseconds(STEP_DELAY_US);
+    digitalWrite(STEP_PIN_X, LOW);
+    delayMicroseconds(STEP_DELAY_US);
+  }
+  currentX = 0;
+}
+
+void homeY() {
+  digitalWrite(DIR_PIN_Y1, HIGH);
+  digitalWrite(DIR_PIN_Y2, LOW);
+  while (digitalRead(LIMIT_SWITCH_Y2) == HIGH) {
+    checkSafetyStop(); 
+    digitalWrite(STEP_PIN_Y, HIGH);
+    delayMicroseconds(STEP_DELAY_US);
+    digitalWrite(STEP_PIN_Y, LOW);
+    delayMicroseconds(STEP_DELAY_US);
+  }
+  currentY = 0;
+}
+
+
+void homeXcube() {
+  digitalWrite(DIR_PIN_X, HIGH);
+  while (digitalRead(LIMIT_SWITCH_X2) == HIGH) {
+    checkSafetyStop(); 
+    digitalWrite(STEP_PIN_X, HIGH);
+    delayMicroseconds(STEP_DELAY_US);
+    digitalWrite(STEP_PIN_X, LOW);
+    delayMicroseconds(STEP_DELAY_US);
+  }
+  currentX = 0;
+}
+void liftGripper(){ servo1.write(60); delay(300); }
+void lowerGripperToGrab(){ servo1.write(10); delay(300); }
+void openGripper(){ servo3.write(40); delay(300); }
+void closeGripper(){ servo3.write(0); delay(300); }
+void resetServosToStart(){ servo1.write(0); servo2.write(90); servo3.write(60); delay(500); }
+
+void moveTo(int targetX, int targetY) {
+  int stepsY = targetY - currentY;
+  bool dirY1 = stepsY > 0 ? HIGH : LOW;
+  bool dirY2 = stepsY > 0 ? LOW : HIGH;
+  moveStepsY(abs(stepsY), dirY1, dirY2);
+
+  int stepsX = targetX - currentX;
+  bool dirX = stepsX > 0 ? HIGH : LOW;
+  moveStepsX(abs(stepsX), dirX);
+
+  currentX = targetX;
+  currentY = targetY;
+}
+
+//--- رسم المربع ---
+void drawSquare(int startX, int startY, int L,int M) {
+  // liftGripper();       
+  moveTo(startX, startY); 
+  lowerGripperToGrab();   
+  moveTo(startX, startY - M);  
+  moveTo(startX + L, startY - M); 
+  moveTo(startX + L, startY);     
+  moveTo(startX, startY);
+  moveTo(startX, startY - M);          
+  liftGripper(); 
+}
+
+
+
+// --- رسم خط مائل ---
+void drawDiagonalLine(int startX, int startY, int endX, int endY, int steps) {
+  lowerGripperToGrab();
+  for (int i = 0; i <= steps; i++) {
+    int targetX = startX + i * (endX - startX) / steps;
+    int targetY = startY + i * (endY - startY) / steps;
+
+    bool dirX = targetX > currentX ? HIGH : LOW;
+    bool dirY1 = targetY > currentY ? LOW : HIGH;
+    bool dirY2 = targetY > currentY ? HIGH : LOW;
+
+    if (currentX != targetX) moveStepsX(1, dirX);
+    if (currentY != targetY) moveStepsY(1, dirY1, dirY2);
+
+    currentX = targetX;
+    currentY = targetY;
+  }
+  // liftGripper();
+}
+
+
+
+// // --- رسم مثلث ---
+void drawTriangle(int X0, int Y0, int X1, int Y1, int steps) {
+liftGripper();
+moveTo(X0, Y0);
+lowerGripperToGrab();
+
+
+drawDiagonalLine(X0, Y0, X1, Y0, steps);
+int midX = (X0 + X1) / 2;
+drawDiagonalLine(X1, Y0, midX, Y1, steps);
+drawDiagonalLine(midX, Y1, X0, Y0, steps);
+liftGripper();
+}
+
+
+
+void drawHouse(int X0, int Y0, int X1, int Y1, int steps) {
+  
+liftGripper();
+moveTo(X0, Y0);
+lowerGripperToGrab();
+
+drawDiagonalLine(X0, Y0, X1, Y0, steps);
+int midX = (X0 + X1) / 2;
+drawDiagonalLine(X1, Y0, midX, Y1, steps);
+drawDiagonalLine(midX, Y1, X0, Y0, steps);
+
+delay(1000);
+
+ moveStepsY(600, HIGH,LOW);
+ moveStepsX(2200, HIGH);
+ moveStepsY(600, LOW,HIGH);
+ moveStepsX(2200, LOW);
+
+liftGripper();
+
+
+}
+
+
+// --- تسلسل التشغيل الرئيسي ---
+void runRobotSequence(char shape) {
+  resetServosToStart();
+  setColor(1, 1, 1); 
+  homeY();
+  homeX();
+
+  // --- رفع السيرفو قبل تشغيل الستيبر ---
+  servoExtra.write(90);  
+  delay(500);  // اعطيه وقت يوصل للزاوية
+
+  // --- تشغيل الستيبر ---
+
+  unsigned long startTime = millis(); while (millis() - startTime < 17000) { while (millis() - startTime < 16000) {  digitalWrite(STEP_PIN_EXTRA, HIGH); delayMicroseconds(200); digitalWrite(STEP_PIN_EXTRA, LOW); delayMicroseconds(200); } }
+
+   // --- إنزال السيرفو بعد انتهاء الستيبر ---
+  servoExtra.write(0);  
+  delay(500);  
+
+
+  openGripper();
+  servo1.write(70);
+  moveStepsX(16000, HIGH);
+  servo1.write(27);
+  delay(2000);
+  closeGripper();
+  delay(1000);
+  for (int angle = 32; angle <= 65; angle++) {
+  servo1.write(angle);
+  delay(20); // كل درجة تأخذ 20ms
+}
+  moveStepsX(9500, LOW);
+  servo2.write(140);
+
+  if (shape == '1') drawSquare(currentX, currentY, 3000, 600);
+  else if (shape == '3') drawTriangle(0, -700, 3000, -100, 2000);
+  else if (shape == '2') drawHouse(0, -700, 3000, -100, 2000);
+ 
+
+  homeY();
+  homeX();
+  
+  
+  servo1.write(70);
+  servo2.write(90);
+  moveStepsX(16000, HIGH);
+  servo1.write(27);
+  delay(2000);
+  openGripper();
+  delay(1000);
+  for (int angle = 32; angle <= 65; angle++) {
+  servo1.write(angle);
+  delay(20); // كل درجة تأخذ 20ms
+}
+
+  homeY();
+  homeX();
+  
+}
+
+///  CUBE GAME
+
+ void liftGripperCube() {
+    int currentAngle = servo1.read();
+    for (int angle = currentAngle; angle <= 60; angle += 2) {
+      servo1.write(angle);
+      delay(30);
+    }
+  }
+
+  void lowerGripperToGrabCube() {
+    servo1.write(8);
+    delay(300);
+  }
+
+  void openGripperCube() {
+    servo3.write(60);
+    delay(500);
+  }
+
+  void closeGripperCube() {
+    servo3.write(20);
+    delay(500);
+  }
+
+   // --- دالة تشغيل تسلسل الحركة الأساسي ---
+void runRobotSequencecube() {
+  // ضبط البداية
+  // resetServosToStart();
+
+  // --- تسلسل 1 ---
+  openGripperCube();
+  liftGripperCube();
+  moveStepsX(11000, HIGH);
+  moveStepsY(1500, LOW, HIGH);
+  lowerGripperToGrabCube();
+  delay(1000);
+  servo1.write(10);
+  closeGripperCube();
+  delay(2000);
+  liftGripperCube();
+  homeX();
+  moveStepsY(1600, HIGH, LOW);
+  lowerGripperToGrabCube();
+  delay(2000);
+  servo3.write(60);
+  delay(1000);
+  servo1.write(15);
+
+  // --- فحص اللون الأحمر للتسلسل 1 ---
+  while (true) {
+    Serial.println("check_color:1");  // اطلب فحص الأحمر
+    delay(100);  // وقت قصير للسماح للـ Pi بالاستجابة
+    if (Serial.available() > 0) {
+      String feedback = Serial.readStringUntil('\n');
+      feedback.trim();
+      if (feedback == "all_correct") { 
+        setColor(0,1,0);   // أخضر
+        myDFPlayer.play(13);
+        break;  // انتقل للتسلسل التالي
+      }
+      else{
+        setColor(1,0,0);
+        myDFPlayer.play(14);
+      }
+    }
+  }
+
+  // --- تسلسل 2 ---
+  homeY();
+  homeX();
+  liftGripperCube();
+  moveStepsX(8300, HIGH);
+  moveStepsY(1500, LOW, HIGH);
+  lowerGripperToGrabCube();
+  delay(1000);
+  servo1.write(10);
+  closeGripperCube();
+  liftGripperCube();
+  homeX();
+  moveStepsY(1750, HIGH, LOW);
+  servo2.write(115);
+  lowerGripperToGrabCube();
+  delay(2000);
+  servo3.write(60);
+  delay(1000);
+  servo1.write(15);
+
+  // --- فحص اللون الأزرق للتسلسل 2 ---
+  while (true) {
+    Serial.println("check_color:2");  // اطلب فحص الأزرق
+    delay(100);
+    if (Serial.available() > 0) {
+      String feedback = Serial.readStringUntil('\n');
+      feedback.trim();
+      if (feedback == "all_correct") { 
+        setColor(0,1,0);
+        myDFPlayer.play(13);
+        break;
+      }
+      else{
+        setColor(1,0,0);
+        myDFPlayer.play(14);
+      }
+    }
+  }
+
+  // --- تسلسل 3 ---
+  homeY();
+  homeX();
+  liftGripperCube();
+  moveStepsX(5700, HIGH);
+  moveStepsY(1850, LOW, HIGH);
+  lowerGripperToGrabCube();
+  delay(1000);
+  servo1.write(10);
+  delay(700);
+  closeGripperCube();
+  liftGripperCube();
+  homeX();
+  moveStepsY(1800, HIGH, LOW);
+  servo2.write(145);
+  lowerGripperToGrabCube();
+  delay(2000);
+  servo3.write(60);
+  delay(1000);
+  liftGripperCube();
+
+  // --- فحص اللون الأصفر للتسلسل 3 ---
+  while (true) {
+    Serial.println("check_color:3");  // اطلب فحص الأصفر
+    delay(100);
+    if (Serial.available() > 0) {
+      String feedback = Serial.readStringUntil('\n');
+      feedback.trim();
+      if (feedback == "all_correct") { 
+        setColor(0,1,0);
+        myDFPlayer.play(13);
+        break;
+      }
+      else{
+        setColor(1,0,0);
+        myDFPlayer.play(14);
+      }
+    }
+  }
+
+  Serial.println("انتهت جميع التسلسلات");
+}
+
+
+  void reverseAllSequences() {
+    Serial.println("بدء العملية العكسية لكل المكعبات...");
+
+    // --- عكس تسلسل 1 ---
+    moveStepsY(50, LOW, HIGH);
+    lowerGripperToGrabCube();
+    closeGripperCube();
+    liftGripperCube();
+    homeY();
+    homeX();
+    liftGripperCube();
+    moveStepsX(11000, HIGH);
+    moveStepsY(1600, LOW, HIGH);
+    lowerGripperToGrabCube();
+    delay(1000);
+    servo1.write(10);
+    openGripperCube();
+    liftGripperCube();
+    homeX();
+    moveStepsY(1750, HIGH, LOW);
+    servo2.write(115);
+    delay(1000);
+
+    // --- عكس تسلسل 2 ---
+    lowerGripperToGrabCube();
+    delay(1000);
+    closeGripperCube();
+    liftGripperCube();
+    homeY();
+    homeX();
+    liftGripperCube();
+    moveStepsX(8450, HIGH);
+    moveStepsY(2000, LOW, HIGH);
+    lowerGripperToGrabCube();
+    delay(1000);
+    servo1.write(10);
+    openGripperCube();
+    liftGripperCube();
+    homeX();
+    homeY();
+    servo2.write(140);
+    servo1.write(0);
+    delay(1000);
+
+    // --- عكس تسلسل 3 ---
+    // lowerGripperToGrab();
+    closeGripperCube();
+    liftGripperCube();
+    homeY();
+    homeX();
+    liftGripperCube();
+    moveStepsX(5600, HIGH);
+    moveStepsY(2000, LOW, HIGH);
+    servo2.write(120);
+    lowerGripperToGrabCube();
+    delay(1000);
+    servo1.write(5);
+    openGripperCube();
+    liftGripperCube();
+    homeX();
+    moveStepsY(2000, HIGH, LOW);
+
+    Serial.println("انتهت العملية العكسية، كل المكعبات رجعت لمواقعها الأصلية.");
+  }
+
+
+
+void startRobotGame() {
+  setColor(1,1,1);
+  gameStarted = true;
+  selectedLevel = 0;
+  myDFPlayer.play(16);
+
+
+  while(currentMode==9){
+    char key = customKeypad.getKey();
+    if (key) {
+
+      // ✅ زر B للخروج من قائمة الرسم
+      if (key == 'B') {
+        currentMode = 0;   // خروج لقائمة الأزرار
+        myDFPlayer.play(21);
+        break;
+      }
+      else if (key == '4') { currentMode = 4; return; }
+      else if (key == '5') { currentMode = 5; return; }
+      else if (key == 'C') { 
+    myDFPlayer.play(21);  
+    
+    resetRobot(); 
+    runRobotSequencecube(); 
+    resetServosToStart();
+}
+
+     else if (key == '0') { 
+      myDFPlayer.play(21); 
+      resetRobot(); 
+      reverseAllSequences(); 
+      resetServosToStart(); 
+    }
+
+      // ✅ زر D بيرجع يفتح نفس القائمة من جديد
+      if (key == 'D') {
+        selectedLevel = 0;
+        myDFPlayer.play(16);
+      }
+
+      // ✅ اختيار مستوى (حتى لو كنت جوه مستوى قديم)
+      if (key=='7'){
+        selectedLevel=1;
+        myDFPlayer.play(17);
+      }
+      else if (key=='8'){
+        selectedLevel=2;
+        myDFPlayer.play(18);
+      }
+
+      // ✅ اختيار الرسومات
+      if (selectedLevel==1) {
+        if (key=='1') {
+          Serial.println(key);
+          myDFPlayer.play(11);
+          runRobotSequence('1');
+        }
+        else if (key=='2') {
+          myDFPlayer.play(12);
+          Serial.println(key);
+          runRobotSequence('3');
+        }
+      }
+      else if (selectedLevel==2) {
+        if (key=='3') {
+          Serial.println(key);
+          runRobotSequence('2');
+        }
+      }
+
+      // ✅ تذكير بعد كل رسمة
+      if (selectedLevel != 0) {
+
+      }
+    }
+
+    // --- قراءة الفيدباك من الراسبيري ---
+    if (Serial.available() > 0) {
+        String feedback = Serial.readStringUntil('\n');
+        feedback.trim();
+        Serial.println(feedback);  // Debug
+
+        if (feedback == "EXCELLENT") { setColor(0,1,0); myDFPlayer.play(13); }
+        else if (feedback == "GOOD") { setColor(0,0,1); myDFPlayer.play(14); }
+        else if (feedback == "RETRY") { setColor(1,0,1); myDFPlayer.play(15); }
+        else setColor(0,0,0);
+    }
+  }
+}
